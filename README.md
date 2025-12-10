@@ -30,12 +30,19 @@ INCLUDE: HUBLI-KARNATAKA-INDIA
 ```
 Again, `DISTRIBUTOR2` cannot authorize `DISTRIBUTOR3` with a region that they themselves do not have access to. 
 
-We've provided a CSV with the list of all countries, states and cities in the world that we know of - please use the data mentioned there for this program. *The codes you see there may be different from what you see here, so please always use the codes in the CSV*. This Readme is only an example. 
+## Steps to run 
 
-Write a program in any language you want (If you're here from Gophercon, use Go :D) that does this. Feel free to make your own input and output format / command line tool / GUI / Webservice / whatever you want. Feel free to hold the dataset in whatever structure you want, but try not to use external databases - as far as possible stick to your langauage without bringing in MySQL/Postgres/MongoDB/Redis/Etc.
+```
+make run
+```
 
-To submit a solution, fork this repo and send a Pull Request on Github. 
+1. Add distributor - `./distrib add distributor1`
+2. To add permissions for a distributor - `./distrib include distributor1 INDIA`
+3. To check if distributor has permission - `./distrib check distributor1 ONGOLE-ANDHRAPRADESH-INDIA`
+4. To list all distributors - `./distrib list`
+5. To exclude a city for a distributor - `./distrib exclude distributor1 TAMILNADU-INDIA`
+6. To show distributor information - `./distrib show distributor1`
+7. To copy permissions from a distributor - `./distrib add distributor2 --parent distributor1`
 
-For any questions or clarifications, raise an issue on this repo and we'll answer your questions as fast as we can.
 
-
+We store the current state in `current_state.json`. If we want to reset all permissions, just remove or delete the json file. 
