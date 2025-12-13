@@ -205,9 +205,9 @@ func (a *App) buildCheckCommand() *cobra.Command {
 				os.Exit(1)
 			}
 			if can {
-				fmt.Println("YES")
+				fmt.Println("Yes can distribute")
 			} else {
-				fmt.Println("NO")
+				fmt.Println("Can't distribute")
 			}
 		},
 	}
