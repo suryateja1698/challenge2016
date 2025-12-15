@@ -151,6 +151,9 @@ func (s *DistributionService) parseLocation(locStr string) models.Location {
 	return models.Location{}
 }
 
+// checkPermission happens in two passes:
+// 1. Detect whether include/exclude rules apply.
+// 2. Enforce that more specific exclusions always override includes.
 func (s *DistributionService) checkPermission(dist *models.Distributor, target models.Location) bool {
 	allPermissions := s.collectPermissions(dist)
 
@@ -161,10 +164,16 @@ func (s *DistributionService) checkPermission(dist *models.Distributor, target m
 		slog.String("target_state", target.State),
 		slog.String("target_country", target.Country))
 
+	// Determine whether ANY include or exclude permission applies to the target location.
+	// This does NOT resolve conflicts yet (include vs exclude).
+	// It only answers:
+	//   - Is this location included by at least one rule?
+	//   - Is this location excluded by at least one rule?
 	included := false
 	excluded := false
 
 	for _, perm := range allPermissions {
+		// Check if this permission applies to the target location
 		if s.matchesLocation(target, perm.Location) {
 			if perm.IsInclude {
 				included = true
@@ -174,7 +183,20 @@ func (s *DistributionService) checkPermission(dist *models.Distributor, target m
 		}
 	}
 
+	// Resolve conflicts between INCLUDE and EXCLUDE rules.
+	// Rule enforced here:
+	//   - EXCLUDE permissions always win over INCLUDE permissions
+	//   - but only when the exclusion is at the same or a more specific level
+	//     (city > state > country).
+	// Example:
+	//   INCLUDE  INDIA
+	//   EXCLUDE  KARNATAKA-INDIA
+	//   TARGET   BANGALORE-KARNATAKA-INDIA
+	//   → Access must be denied.
+	//
+	// If such a specific exclusion exists, we deny immediately.
 	for _, perm := range allPermissions {
+		// Only exclusion rules can override previously detected includes
 		if !perm.IsInclude && s.matchesLocation(target, perm.Location) {
 			if s.isMoreSpecific(perm.Location, target) {
 				return false
@@ -182,6 +204,10 @@ func (s *DistributionService) checkPermission(dist *models.Distributor, target m
 		}
 	}
 
+	// Final decision:
+	// Access is allowed only if at least one INCLUDE rule applies
+	// and no EXCLUDE rule applies at the same or broader level.
+	// (Specific exclusions would have already returned false above.)
 	return included && !excluded
 }
 
