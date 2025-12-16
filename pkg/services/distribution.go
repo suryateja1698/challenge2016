@@ -82,6 +82,21 @@ func (s *DistributionService) AddPermission(distName string, isInclude bool, loc
 	}
 
 	loc := s.parseLocation(locationStr)
+
+	if dist.Parent != "" {
+		parentDistributor, exists := s.distributors[dist.Parent]
+		if !exists {
+			s.logger.Warn("parent not found", slog.String("parent", dist.Parent))
+			return fmt.Errorf("parent not found")
+		}
+
+		canPDistribute, err := s.CanDistribute(parentDistributor.Name, locationStr)
+		if err != nil || !canPDistribute {
+			s.logger.Error("parent can't distribute", "location", locationStr)
+			return fmt.Errorf("parent can't distribute")
+		}
+	}
+
 	perm := models.Permission{
 		IsInclude: isInclude,
 		Location:  loc,
@@ -231,11 +246,11 @@ func (s *DistributionService) getSpecificity(loc models.Location) int {
 func (s *DistributionService) collectPermissions(dist *models.Distributor) []models.Permission {
 	var perms []models.Permission
 
-	if dist.Parent != "" {
-		if parent, exists := s.distributors[dist.Parent]; exists {
-			perms = append(perms, s.collectPermissions(parent)...)
-		}
-	}
+	// if dist.Parent != "" {
+	// 	if parent, exists := s.distributors[dist.Parent]; exists {
+	// 		perms = append(perms, s.collectPermissions(parent)...)
+	// 	}
+	// }
 
 	perms = append(perms, dist.Permissions...)
 
