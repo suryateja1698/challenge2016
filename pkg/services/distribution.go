@@ -151,9 +151,23 @@ func (s *DistributionService) parseLocation(locStr string) models.Location {
 	return models.Location{}
 }
 
-// checkPermission happens in two passes:
-// 1. Detect whether include/exclude rules apply.
-// 2. Enforce that more specific exclusions always override includes.
+// checkPermission determines whether a distributor is allowed to operate
+// in the given target location.
+//
+// Permission resolution rules:
+//  1. Only permissions that match the target location are considered.
+//  2. Among matching permissions, the MOST SPECIFIC rule wins
+//     (CITY > STATE > COUNTRY).
+//  3. If both INCLUDE and EXCLUDE rules exist at the same specificity,
+//     EXCLUDE wins (safer default).
+//  4. A more specific INCLUDE can override a broader EXCLUDE.
+//
+// Example:
+//
+//	EXCLUDE  ANDHRAPRADESH-INDIA        (state)
+//	INCLUDE  ONGOLE-ANDHRAPRADESH-INDIA (city)
+//	TARGET   ONGOLE-ANDHRAPRADESH-INDIA
+//	→ Allowed (include is more specific).
 func (s *DistributionService) checkPermission(dist *models.Distributor, target models.Location) bool {
 	allPermissions := s.collectPermissions(dist)
 
@@ -164,51 +178,53 @@ func (s *DistributionService) checkPermission(dist *models.Distributor, target m
 		slog.String("target_state", target.State),
 		slog.String("target_country", target.Country))
 
-	// Determine whether ANY include or exclude permission applies to the target location.
-	// This does NOT resolve conflicts yet (include vs exclude).
-	// It only answers:
-	//   - Is this location included by at least one rule?
-	//   - Is this location excluded by at least one rule?
-	included := false
-	excluded := false
+	var mostSpecificInclude *models.Permission
+	var mostSpecificExclude *models.Permission
 
-	for _, perm := range allPermissions {
-		// Check if this permission applies to the target location
+	for i := range allPermissions {
+		perm := &allPermissions[i]
 		if s.matchesLocation(target, perm.Location) {
+			specificity := s.getSpecificity(perm.Location)
+
 			if perm.IsInclude {
-				included = true
+				if mostSpecificInclude == nil || specificity > s.getSpecificity(mostSpecificInclude.Location) {
+					mostSpecificInclude = perm
+				}
 			} else {
-				excluded = true
+				if mostSpecificExclude == nil || specificity > s.getSpecificity(mostSpecificExclude.Location) {
+					mostSpecificExclude = perm
+				}
 			}
 		}
 	}
 
-	// Resolve conflicts between INCLUDE and EXCLUDE rules.
-	// Rule enforced here:
-	//   - EXCLUDE permissions always win over INCLUDE permissions
-	//   - but only when the exclusion is at the same or a more specific level
-	//     (city > state > country).
-	// Example:
-	//   INCLUDE  INDIA
-	//   EXCLUDE  KARNATAKA-INDIA
-	//   TARGET   BANGALORE-KARNATAKA-INDIA
-	//   → Access must be denied.
-	//
-	// If such a specific exclusion exists, we deny immediately.
-	for _, perm := range allPermissions {
-		// Only exclusion rules can override previously detected includes
-		if !perm.IsInclude && s.matchesLocation(target, perm.Location) {
-			if s.isMoreSpecific(perm.Location, target) {
-				return false
-			}
-		}
+	// No include permission found, we return false
+	if mostSpecificInclude == nil {
+		return false
 	}
 
-	// Final decision:
-	// Access is allowed only if at least one INCLUDE rule applies
-	// and no EXCLUDE rule applies at the same or broader level.
-	// (Specific exclusions would have already returned false above.)
-	return included && !excluded
+	// No exclude permission found, we can continue the flow
+	if mostSpecificExclude == nil {
+		return true
+	}
+
+	// Both include and exclude exist - compare specificity
+	includeSpec := s.getSpecificity(mostSpecificInclude.Location)
+	excludeSpec := s.getSpecificity(mostSpecificExclude.Location)
+
+	// More specific permission wins
+	// If equal specificity, exclude wins (safer default)
+	return includeSpec > excludeSpec
+}
+
+func (s *DistributionService) getSpecificity(loc models.Location) int {
+	if loc.IsCityLevel() {
+		return 3 // Most specific: CITY-STATE-COUNTRY
+	}
+	if loc.IsStateLevel() {
+		return 2 // Medium specific: STATE-COUNTRY
+	}
+	return 1 // Least specific: COUNTRY
 }
 
 // collectPermissions collects all permissions from distributor chain
@@ -237,13 +253,4 @@ func (s *DistributionService) matchesLocation(target models.Location, perm model
 	}
 
 	return target.City == perm.City && target.State == perm.State && target.Country == perm.Country
-}
-
-// isMoreSpecific checks if location is more or equally specific
-func (s *DistributionService) isMoreSpecific(loc models.Location, target models.Location) bool {
-	cityMatch := loc.City == "" || loc.City == target.City
-	stateMatch := loc.State == "" || loc.State == target.State
-	countryMatch := loc.Country == target.Country
-
-	return cityMatch && stateMatch && countryMatch
 }
